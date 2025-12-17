@@ -31,6 +31,19 @@ billing_id_only=$(basename "$billing_id")
 
 echo "You selected billing account: $billing_choice ($billing_id_only)"
 
+# --- Support Email Prompt ---
+default_email=$(gcloud config get-value account 2>/dev/null || echo "")
+
+if [ -z "$default_email" ]; then
+    read -p "Enter support email: " support_email
+else
+    read -p "Enter support email (default: $default_email): " support_email
+    support_email=${support_email:-$default_email}
+fi
+
+echo "You selected support email: $support_email"
+
+
 # --- Update Terraform Variables ---
 TF_VARS_FILE="terraform/terraform.tfvars"
 echo "Updating Terraform variables in $TF_VARS_FILE..."
@@ -38,8 +51,11 @@ echo "Updating Terraform variables in $TF_VARS_FILE..."
 # Create the terraform directory if it doesn't exist
 mkdir -p terraform
 
-# Write the billing account to the terraform.tfvars file
-echo "billing_account = \"$billing_id_only\"" > "$TF_VARS_FILE"
+# Write the billing account and support email to the terraform.tfvars file
+cat << EOF > "$TF_VARS_FILE"
+billing_account = "$billing_id_only"
+support_email   = "$support_email"
+EOF
 
 echo "Terraform variables updated successfully!"
 echo "You can now run 'terraform apply' in the 'terraform' directory."
