@@ -12,39 +12,27 @@ provider "google" {
   region  = var.region
 }
 
-resource "random_id" "project_suffix" {
+resource "random_id" "obsidian_project_suffix" {
   byte_length = 4
 }
 
 resource "google_project" "obsidian_gcal_sync" {
   name            = var.project_id
-  project_id      = "${var.project_id}-${random_id.project_suffix.hex}"
-  billing_account = var.billing_account
+  project_id      = "${var.project_id}-${random_id.obsidian_project_suffix.hex}"
+  #billing_account = var.billing_account
   labels = {
     "created-by" = "terraform"
   }
 }
 
-resource "google_project_service" "calendar_api" {
+resource "google_project_service" "iap" {
+  project = google_project.obsidian_gcal_sync.project_id
+  service = "iap.googleapis.com"
+}
+
+resource "google_project_service" "calendar_json" {
   project = google_project.obsidian_gcal_sync.project_id
   service = "calendar-json.googleapis.com"
-
-  // Don't disable the service on terraform destroy
-  disable_on_destroy = false
 }
 
-resource "google_oauth_brand" "obsidian_gcal_sync_brand" {
-  project_number    = google_project.obsidian_gcal_sync.number
-  support_email     = var.support_email
-  application_title = "Obsidian GCal Sync"
-}
-
-resource "google_oauth_client" "obsidian_gcal_sync_client" {
-  project       = google_project.obsidian_gcal_sync.project_id
-  brand         = google_oauth_brand.obsidian_gcal_sync_brand.name
-  name          = "obsidian-gcal-sync-client"
-  redirect_uris = [
-    "http://localhost:8085",
-    "https://obsidian-gcal-sync.netlify.app/.netlify/functions/auth"
-  ]
-}
+# TODO: open browser to this url: https://console.cloud.google.com/auth/clients?project=obsidian-gcal-sync-df95efa5
