@@ -20,9 +20,16 @@ const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
  */
 async function loadSavedCredentialsIfExist(): Promise<OAuth2Client | null> {
   try {
-    const content = await fs.readFile(TOKEN_PATH);
-    const credentials = JSON.parse(content.toString());
-    return google.auth.fromJSON(credentials);
+    const tokenContent = await fs.readFile(TOKEN_PATH);
+    const token = JSON.parse(tokenContent.toString());
+
+    const credsContent = await fs.readFile(CREDENTIALS_PATH);
+    const keys = JSON.parse(credsContent.toString());
+    const key = keys.installed || keys.web;
+
+    const client = new google.auth.OAuth2(key.client_id, key.client_secret, key.redirect_uris[0]);
+    client.setCredentials(token);
+    return client;
   } catch (err) {
     console.log(err);
     return null;
@@ -36,15 +43,7 @@ async function loadSavedCredentialsIfExist(): Promise<OAuth2Client | null> {
  * @return {Promise<void>}
  */
 async function saveCredentials(client: OAuth2Client): Promise<void> {
-  const content = await fs.readFile(CREDENTIALS_PATH);
-  const keys = JSON.parse(content.toString());
-  const key = keys.installed || keys.web;
-  const payload = JSON.stringify({
-    type: 'authorized_user',
-    client_id: key.client_id,
-    client_secret: key.client_secret,
-    refresh_token: client.credentials.refresh_token,
-  });
+  const payload = JSON.stringify(client.credentials);
   await fs.writeFile(TOKEN_PATH, payload);
 }
 
@@ -88,4 +87,8 @@ async function listCalendars(auth: OAuth2Client) {
   });
 }
 
-authorize().then(listCalendars).catch(console.error);
+authorize().then(client => {
+    if (client) {
+        listCalendars(client);
+    }
+}).catch(console.error);
