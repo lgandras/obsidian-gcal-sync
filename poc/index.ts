@@ -19,10 +19,15 @@ const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
  * @return {Promise<OAuth2Client|null>}
  */
 async function loadSavedCredentialsIfExist(): Promise<OAuth2Client | null> {
+  var token
   try {
     const tokenContent = await fs.readFile(TOKEN_PATH);
-    const token = JSON.parse(tokenContent.toString());
-
+    token = JSON.parse(tokenContent.toString());
+  } catch (err) {
+    console.log(`Token file not found or not valid: ${err}`)
+    return null;
+  }
+  try {
     const credsContent = await fs.readFile(CREDENTIALS_PATH);
     const keys = JSON.parse(credsContent.toString());
     const key = keys.installed || keys.web;
