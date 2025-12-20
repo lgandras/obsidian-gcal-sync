@@ -34,6 +34,7 @@
         "@codemirror/language": "^6.10.7",
         "@codemirror/state": "^6.2.1",
         "@codemirror/view": "^6.21.3",
+        "@google-cloud/local-auth": "^3.0.1",
         "@googleapis/oauth2": "^1.0.0",
         "dotenv": "^16.4.1",
         "googleapis": "^128.0.0",
