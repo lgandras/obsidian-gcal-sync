@@ -1,92 +1,114 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import process from 'process';
-import { authenticate } from '@google-cloud/local-auth';
-import { google, Auth } from 'googleapis';
-import { Credentials, OAuth2Client } from 'google-auth-library';
-import { GoogleAuthManagerInterface } from '../src/core/types';
+import { OAuth2Client, Credentials } from 'google-auth-library';
+import { google } from 'googleapis';
+import { Notice, Platform, ObsidianProtocolData } from 'obsidian';
+import GoogleCalendarSyncPlugin from '../core/main';
+import { OAuth2Tokens } from '../core/types';
+import { LogUtils } from '../utils/logUtils';
+import { openWith } from '../utils/fsUtils';
 
-const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
-const TOKEN_PATH = path.join(process.cwd(), 'token.json');
-const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
+export class GoogleAuthManager {
+    private plugin: GoogleCalendarSyncPlugin;
+    private auth: OAuth2Client;
 
-export class GoogleAuthManager implements GoogleAuthManagerInterface {
-    private client: OAuth2Client | null = null;
-
-    constructor() {
-        this.loadSavedCredentialsIfExist().then(client => {
-            this.client = client;
-        });
+    constructor(plugin: GoogleCalendarSyncPlugin) {
+        this.plugin = plugin;
+        this.auth = this.createOAuth2Client();
     }
 
-    private async loadSavedCredentialsIfExist(): Promise<OAuth2Client | null> {
-        try {
-            const tokenContent = await fs.readFile(TOKEN_PATH);
-            const token = JSON.parse(tokenContent.toString());
+    private createOAuth2Client(): OAuth2Client {
+        const { clientId, clientSecret } = this.plugin.settings;
+        const redirectUri = Platform.isMobile ? 'app://obsidian.md/auth/gcalsync' : 'http://127.0.0.1:42813/auth/gcalsync';
+        return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+    }
 
-            const credsContent = await fs.readFile(CREDENTIALS_PATH);
-            const keys = JSON.parse(credsContent.toString());
-            const key = keys.installed || keys.web;
+    private credentialsToOAuth2Tokens(credentials: Credentials): OAuth2Tokens {
+        return {
+            access_token: credentials.access_token || '',
+            refresh_token: credentials.refresh_token || undefined,
+            scope: credentials.scope || '',
+            token_type: credentials.token_type || '',
+            expiry_date: credentials.expiry_date || 0,
+        };
+    }
 
-            const client = new google.auth.OAuth2(key.client_id, key.client_secret, key.redirect_uris[0]);
-            client.setCredentials(token);
-            return client;
-        } catch (err) {
-            console.log(`Token file not found or not valid: ${err}`);
+    public getOAuth2Client(): OAuth2Client {
+        return this.auth;
+    }
+
+    public async loadSavedTokens(): Promise<void> {
+        if (this.plugin.settings.oauth2Tokens) {
+            this.auth.setCredentials(this.plugin.settings.oauth2Tokens);
+        }
+    }
+
+    public isAuthenticated(): boolean {
+        return !!this.plugin.settings.oauth2Tokens?.access_token;
+    }
+
+    public async getValidAccessToken(): Promise<string | null | undefined> {
+        if (!this.isAuthenticated()) {
             return null;
         }
-    }
 
-    private async saveCredentials(client: OAuth2Client): Promise<void> {
-        const payload = JSON.stringify(client.credentials);
-        await fs.writeFile(TOKEN_PATH, payload);
-    }
-
-    getOAuth2Client(): OAuth2Client {
-        if (!this.client) {
-            throw new Error("OAuth2Client not initialized.");
+        const expiryDate = this.auth.credentials.expiry_date || 0;
+        if (expiryDate < Date.now() + 60 * 1000) {
+            try {
+                const { credentials } = await this.auth.refreshAccessToken();
+                this.plugin.settings.oauth2Tokens = this.credentialsToOAuth2Tokens(credentials);
+                await this.plugin.saveSettings();
+            } catch (error) {
+                LogUtils.error('Failed to refresh access token:', error);
+                this.plugin.settings.oauth2Tokens = undefined;
+                await this.plugin.saveSettings();
+                return null;
+            }
         }
-        return this.client;
+        return this.auth.credentials.access_token;
     }
 
-    async startAuthFlow(): Promise<void> {
-        this.client = await authenticate({
-            scopes: SCOPES,
-            keyfilePath: CREDENTIALS_PATH,
+    public async authorize(): Promise<void> {
+        const authUrl = this.auth.generateAuthUrl({
+            access_type: 'offline',
+            prompt: 'consent',
+            scope: ['https://www.googleapis.com/auth/calendar'],
         });
-        if (this.client.credentials) {
-            await this.saveCredentials(this.client);
-        }
+
+        openWith(authUrl);
     }
 
-    async refreshTokens(tokens: Credentials): Promise<Credentials> {
-        if (!this.client) {
-            throw new Error("OAuth2Client not initialized.");
+    public async handleProtocolCallback(params: ObsidianProtocolData): Promise<void> {
+        const code = params.code;
+        if (!code) {
+            throw new Error('Missing authorization code in callback parameters');
         }
-        this.client.setCredentials(tokens);
-        const refreshedTokens = await this.client.refreshAccessToken();
-        if (refreshedTokens.credentials) {
-            await this.saveCredentials(this.client);
-            return refreshedTokens.credentials;
-        }
-        throw new Error("Failed to refresh tokens.");
-    }
-
-    async revokeTokens(tokens: Credentials): Promise<void> {
-        if (!this.client) {
-            throw new Error("OAuth2Client not initialized.");
-        }
-        await this.client.revokeCredentials();
         try {
-            await fs.unlink(TOKEN_PATH);
-        } catch (err) {
-            console.error("Error deleting token file:", err);
+            const { tokens } = await this.auth.getToken(code);
+            this.auth.setCredentials(tokens);
+            this.plugin.settings.oauth2Tokens = this.credentialsToOAuth2Tokens(tokens);
+            await this.plugin.saveSettings();
+        } catch (error) {
+            LogUtils.error('Failed to handle protocol callback:', error);
+            throw error;
         }
     }
 
-    async onunload(): Promise<void> {
+    public async revokeAccess(): Promise<void> {
+        if (this.isAuthenticated()) {
+            try {
+                await this.auth.revokeCredentials();
+            } catch (error) {
+                LogUtils.error('Failed to revoke credentials:', error);
+            }
+        }
+        this.plugin.settings.oauth2Tokens = undefined;
+        await this.plugin.saveSettings();
+    }
+
+    public async cleanup(): Promise<void> {
+        // Nothing to do
+    }
+
+    public async onunload(): Promise<void> {
         // Nothing to do here for this implementation
     }
 }
-
-export default GoogleAuthManager;

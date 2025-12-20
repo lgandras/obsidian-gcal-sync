@@ -1,16 +1,16 @@
 import { promises as fs } from 'fs';
-import path from 'path';
-import process from 'process';
+import * as path from 'path';
+import * as process from 'process';
 import { authenticate } from '@google-cloud/local-auth';
 import { google, Auth } from 'googleapis';
 import { Credentials, OAuth2Client } from 'google-auth-library';
-import { GoogleAuthManagerInterface } from '../src/core/types';
+
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
 const TOKEN_PATH = path.join(process.cwd(), 'token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
 
-class GoogleAuthManager implements GoogleAuthManagerInterface {
+class GoogleAuthManager {
     private client: OAuth2Client | null = null;
 
     constructor() {
@@ -83,10 +83,4 @@ class GoogleAuthManager implements GoogleAuthManagerInterface {
             console.error("Error deleting token file:", err);
         }
     }
-
-    async onunload(): Promise<void> {
-        // Nothing to do here for this implementation
-    }
 }
-
-export default GoogleAuthManager;

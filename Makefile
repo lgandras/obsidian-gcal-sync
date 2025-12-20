@@ -18,6 +18,8 @@ build:
 	npm install
 	npm run build
 
+OBSIDIAN_VAULT_PATH ?= ~/Obsidian/Default
+
 install: build
-	mkdir -p ~/Obsidian/Default/.obsidian/plugins/obsidian-gcal-sync
-	cp main.js manifest.json styles.css ~/Obsidian/Default/.obsidian/plugins/obsidian-gcal-sync/
+	mkdir -p $(OBSIDIAN_VAULT_PATH)/.obsidian/plugins/obsidian-gcal-sync
+	cp main.js manifest.json styles.css $(OBSIDIAN_VAULT_PATH)/.obsidian/plugins/obsidian-gcal-sync/
