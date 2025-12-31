@@ -17,7 +17,7 @@ export class GoogleAuthManager {
 
     private createOAuth2Client(): OAuth2Client {
         const { clientId, clientSecret } = this.plugin.settings;
-        const redirectUri = Platform.isMobile ? 'app://obsidian.md/auth/gcalsync' : 'http://127.0.0.1:42813/auth/gcalsync';
+        const redirectUri = 'http://127.0.0.1:42813/auth/gcalsync';
         return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
     }
 
