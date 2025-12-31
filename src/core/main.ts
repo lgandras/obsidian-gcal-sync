@@ -59,60 +59,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             // Make sure any previous protocol handlers are cleaned up first
             await this.authManager.cleanup();
 
-            // Register protocol handler for mobile OAuth
-            this.registerObsidianProtocolHandler('auth/gcalsync', async (params) => {
-                if (this.authManager) {
-                    try {
-                        console.log('Received protocol callback with parameters:', params);
 
-                        if (!params.code) {
-                            throw new Error('Missing authorization code in callback parameters');
-                        }
-
-                        await this.authManager.handleProtocolCallback(params);
-
-                        // Successfully authenticated, show success message
-                        console.log('🔐 Successfully completed authentication via protocol handler');
-                        new Notice('Successfully connected to Google Calendar!');
-
-                        // Set authentication state before initializing calendar sync
-                        useStore.getState().setAuthenticated(true);
-
-                        // Also update the UI status immediately to reflect authenticated state
-                        useStore.getState().setStatus('connected');
-                        this.updateRibbonStatus('connected');
-
-                        // Initialize calendar sync after authentication is complete
-                        await this.initializeCalendarSync();
-                    } catch (error) {
-                        console.error('Error handling protocol callback:', error);
-
-                        // Provide more specific error messages based on error type
-                        let errorMessage = 'Authentication failed. Please try connecting again.';
-
-                        if (error instanceof Error) {
-                            if (error.message.includes('network')) {
-                                errorMessage = 'Network error during authentication. Check your internet connection and try again.';
-                            } else if (error.message.includes('invalid_grant')) {
-                                errorMessage = 'Invalid authorization. Please try authenticating again.';
-                            } else if (error.message.includes('access_denied')) {
-                                errorMessage = 'Access was denied. Please grant all required permissions when authenticating.';
-                            } else if (error.message.includes('Missing authorization code')) {
-                                errorMessage = 'Missing authorization data. Please complete the full authentication process.';
-                            }
-                        }
-
-                        // Show a specific error notice that gives clearer instruction
-                        new Notice(errorMessage, 10000); // Show for 10 seconds for better visibility
-
-                        // Update UI state
-                        useStore.getState().setStatus('disconnected');
-                        useStore.getState().setAuthenticated(false);
-                        // Store error in status
-                        useStore.getState().setStatus('error', error instanceof Error ? error : new Error(String(error)));
-                    }
-                }
-            });
 
             try {
                 await this.authManager.loadSavedTokens();
@@ -540,9 +487,8 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
         if (!this.authManager) return;
 
         try {
-            // Verify authentication before proceeding, skip prompt if we're coming from protocol handler
-            const isAuthenticatedFromHandler = useStore.getState().authenticated;
-            if (!await this.verifyAuthentication(isAuthenticatedFromHandler)) {
+            // Verify authentication before proceeding
+            if (!await this.verifyAuthentication()) {
                 useStore.getState().setStatus('disconnected');
                 console.log('Authentication verification failed, not initializing calendar sync');
                 return;
@@ -753,13 +699,14 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
     }
 
     private initializeRibbonIcon() {
-        return this.addRibbonIcon('calendar-clock', 'Google Calendar Sync', (e: MouseEvent) => {
+        return this.addRibbonIcon('calendar-clock', 'Google Calendar Sync', async (e: MouseEvent) => {
             // Check both the authManager and the store state
             const storeAuthenticated = useStore.getState().authenticated;
             const authManagerAuthenticated = this.authManager?.isAuthenticated() || false;
 
             if (!storeAuthenticated && !authManagerAuthenticated) {
-                this.authManager?.authorize();
+                await this.authManager?.authorize();
+                await this.initializeCalendarSync();
             } else {
                 this.showSyncMenu(e);
             }
@@ -842,9 +789,10 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
     private initializeStatusBar() {
         this.statusBarItem = this.addStatusBarItem();
         this.statusBarItem.addClass('gcal-sync-status');
-        this.statusBarItem.onClickEvent((event: MouseEvent) => {
+        this.statusBarItem.onClickEvent(async (event: MouseEvent) => {
             if (!this.authManager?.isAuthenticated()) {
-                this.authManager?.authorize();
+                await this.authManager?.authorize();
+                await this.initializeCalendarSync();
             } else {
                 this.showSyncMenu(event);
             }
@@ -1048,13 +996,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
      * Checks if the current token is valid or renews it if needed.
      * @returns true if the token is valid or was successfully renewed
      */
-    private async verifyAuthentication(skipPrompt = false): Promise<boolean> {
-        // First check the store state - if we were just authenticated via protocol handler
-        if (useStore.getState().authenticated) {
-            console.log('Already authenticated according to store state');
-            return true;
-        }
-
+    private async verifyAuthentication(): Promise<boolean> {
         // If we're already authenticated, return true
         if (this.authManager && this.authManager.isAuthenticated()) {
             try {
@@ -1065,11 +1007,6 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                 console.log('Token verification failed:', error);
                 // Token might be invalid, proceed to authentication flow
             }
-        }
-
-        // If skipPrompt is true, we're coming from the protocol handler or other authenticated source
-        if (skipPrompt) {
-            return false;
         }
 
         // Ask user if they want to connect

@@ -1,10 +1,13 @@
 import { OAuth2Client, Credentials } from 'google-auth-library';
 import { google } from 'googleapis';
-import { Notice, Platform, ObsidianProtocolData } from 'obsidian';
+import { Notice, Platform } from 'obsidian';
 import GoogleCalendarSyncPlugin from '../core/main';
 import { OAuth2Tokens } from '../core/types';
 import { LogUtils } from '../utils/logUtils';
-import { openWith } from '../utils/fsUtils';
+import { authenticate } from '@google-cloud/local-auth';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 export class GoogleAuthManager {
     private plugin: GoogleCalendarSyncPlugin;
@@ -12,13 +15,7 @@ export class GoogleAuthManager {
 
     constructor(plugin: GoogleCalendarSyncPlugin) {
         this.plugin = plugin;
-        this.auth = this.createOAuth2Client();
-    }
-
-    private createOAuth2Client(): OAuth2Client {
-        const { clientId, clientSecret } = this.plugin.settings;
-        const redirectUri = 'http://127.0.0.1:42813/auth/gcalsync';
-        return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+        this.auth = new google.auth.OAuth2();
     }
 
     private credentialsToOAuth2Tokens(credentials: Credentials): OAuth2Tokens {
@@ -67,28 +64,53 @@ export class GoogleAuthManager {
     }
 
     public async authorize(): Promise<void> {
-        const authUrl = this.auth.generateAuthUrl({
-            access_type: 'offline',
-            prompt: 'consent',
-            scope: ['https://www.googleapis.com/auth/calendar'],
-        });
+        
+        const credentialsPath = path.join(os.homedir(), '.config', 'obsidian-gcal-sync', 'credentials.json');
 
-        openWith(authUrl);
-    }
-
-    public async handleProtocolCallback(params: ObsidianProtocolData): Promise<void> {
-        const code = params.code;
-        if (!code) {
-            throw new Error('Missing authorization code in callback parameters');
-        }
         try {
-            const { tokens } = await this.auth.getToken(code);
-            this.auth.setCredentials(tokens);
-            this.plugin.settings.oauth2Tokens = this.credentialsToOAuth2Tokens(tokens);
-            await this.plugin.saveSettings();
+            await fs.mkdir(path.dirname(credentialsPath), { recursive: true });
+            await fs.writeFile(credentialsPath, JSON.stringify({
+                "installed": {
+                    "client_id": this.plugin.settings.clientId,
+                    "project_id": "obsidian-gcal-sync",
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                    "client_secret": this.plugin.settings.clientSecret,
+                    "redirect_uris": [
+                        "http://localhost:42813/auth/gcalsync"
+                    ]
+                }
+            }));
+        } catch(err) {
+            LogUtils.error('Failed to write credentials file:', err);
+            new Notice('Failed to write credentials file required for authentication.');
+            return;
+        }
+
+        try {
+            const client = await authenticate({
+                scopes: ['https://www.googleapis.com/auth/calendar'],
+                keyfilePath: credentialsPath,
+            });
+
+            if (client.credentials) {
+                this.auth.setCredentials(client.credentials);
+                this.plugin.settings.oauth2Tokens = this.credentialsToOAuth2Tokens(client.credentials);
+                await this.plugin.saveSettings();
+                new Notice('Successfully authenticated with Google Calendar!');
+            } else {
+                new Notice('Authentication failed. Please try again.');
+            }
         } catch (error) {
-            LogUtils.error('Failed to handle protocol callback:', error);
-            throw error;
+            LogUtils.error('Failed to authenticate:', error);
+            new Notice('Authentication failed. Check the console for more details.');
+        } finally {
+            try {
+                await fs.unlink(credentialsPath);
+            } catch (err) {
+                LogUtils.error('Failed to delete credentials file:', err);
+            }
         }
     }
 
