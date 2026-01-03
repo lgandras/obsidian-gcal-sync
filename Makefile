@@ -22,4 +22,4 @@ OBSIDIAN_VAULT_PATH ?= ~/Obsidian/Default
 
 install: build
 	mkdir -p $(OBSIDIAN_VAULT_PATH)/.obsidian/plugins/obsidian-gcal-sync
-	cp main.js manifest.json styles.css $(OBSIDIAN_VAULT_PATH)/.obsidian/plugins/obsidian-gcal-sync/
+	cp main.js manifest.json styles.css src/calendar/credentials.json $(OBSIDIAN_VAULT_PATH)/.obsidian/plugins/obsidian-gcal-sync/
